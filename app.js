@@ -180,19 +180,24 @@ function precipWindows(data, startIdx, endIdx) {
     w.isSnow = w.snow >= 0.1;
     w.kind = w.isSnow ? 'Snow' : 'Rain';
     w.amountText = w.isSnow ? fmtAmt(w.snow) + ' in of snow' : fmtAmt(w.total) + ' in of rain';
+    var hrs = w.end - w.start + 1;
+    var rate = (w.isSnow ? w.snow : w.total) / hrs;
+    if (w.isSnow) w.intensity = rate < 0.2 ? 'Light' : rate < 0.5 ? 'Moderate' : 'Heavy';
+    else w.intensity = rate < 0.03 ? 'Light' : rate < 0.12 ? 'Moderate' : 'Heavy';
   });
   return out;
 }
 function windowSentence(w, data, liveIdx) {
   var H = data.hourly;
   var endTxt = fmtHour(H.time[Math.min(w.end + 1, H.time.length - 1)]);
+  var tail = ' · ' + w.intensity.toLowerCase() + ' · ' + w.amountText;
   if (liveIdx !== null && w.start <= liveIdx && w.end >= liveIdx) {
-    return '<b>' + w.kind + ' now</b>, ending around <b>' + endTxt + '</b> · ' + w.amountText + ' total';
+    return '<b>' + w.kind + ' now</b>, ending around <b>' + endTxt + '</b>' + tail + ' total';
   }
   if (liveIdx !== null && w.start <= liveIdx) {
-    return '<b>' + w.kind + '</b> until about ' + endTxt + ' · ' + w.amountText;
+    return '<b>' + w.kind + '</b> until about ' + endTxt + tail;
   }
-  return '<b>' + w.kind + ' starting ' + fmtHour(H.time[w.start]) + '</b>, through about ' + endTxt + ' · ' + w.amountText;
+  return '<b>' + w.kind + ' starting ' + fmtHour(H.time[w.start]) + '</b>, through about ' + endTxt + tail;
 }
 
 /* ---------------- Charts (inline SVG) ---------------- */
@@ -387,11 +392,17 @@ function fillCard(cardEl, data, features) {
   var nI = nowIdx(data);
   var wins = precipWindows(data, nI, endOfDayIdx(data, 0));
   var sev = windSev(c.wind_speed_10m, c.wind_gusts_10m);
-  cardEl.querySelector('[data-role="temp"]').textContent = Math.round(c.temperature_2m) + '°';
-  cardEl.querySelector('[data-role="cond"]').textContent = ci[0] + ' ' + ci[1];
-  var precipTxt = wins.length
-    ? windowSentence(wins[0], data, nI).replace(/<[^>]+>/g, '')
-    : 'No rain or snow the rest of today';
+  // Andy prefers feels-like / wind chill as the headline number.
+  var feels = (c.apparent_temperature !== null && c.apparent_temperature !== undefined) ? c.apparent_temperature : c.temperature_2m;
+  cardEl.querySelector('[data-role="temp"]').textContent = Math.round(feels) + '°';
+  cardEl.querySelector('[data-role="cond"]').textContent = 'feels like · ' + ci[0] + ' ' + ci[1] + ' · actual ' + Math.round(c.temperature_2m) + '°';
+  var precipTxt;
+  if (wins.length) {
+    precipTxt = wins.slice(0, 2).map(function (w) { return windowSentence(w, data, nI).replace(/<[^>]+>/g, ''); }).join('  ·  ');
+    if (wins.length > 2) precipTxt += '  ·  +' + (wins.length - 2) + ' more';
+  } else {
+    precipTxt = 'No rain or snow the rest of today';
+  }
   cardEl.querySelector('[data-role="meta"]').innerHTML =
     'H <b>' + Math.round(data.daily.temperature_2m_max[0]) + '°</b> / L <b>' + Math.round(data.daily.temperature_2m_min[0]) + '°</b> · ' +
     'Wind <b>' + sev.label + '</b><br>' + esc(precipTxt);
@@ -527,10 +538,11 @@ function renderDetail() {
   html += '<h1>' + esc(place.name) + '</h1>';
   if (isToday) {
     var c = data.current, cci = codeInfo(c.weather_code);
-    html += '<div class="hero"><div><div class="big-temp">' + Math.round(c.temperature_2m) + '°</div>' +
-      '<div class="cond-line">' + cci[0] + ' ' + cci[1] + '</div></div>' +
+    var feelsNow = (c.apparent_temperature !== null && c.apparent_temperature !== undefined) ? c.apparent_temperature : c.temperature_2m;
+    html += '<div class="hero"><div><div class="big-temp">' + Math.round(feelsNow) + '°</div>' +
+      '<div class="cond-line">feels like · ' + cci[0] + ' ' + cci[1] + '</div></div>' +
       '<div class="hero-side">' + sceneHtml(c.weather_code) + '</div></div>';
-    html += '<div class="kv">Feels like <b>' + Math.round(c.apparent_temperature) + '°</b> · High <b>' +
+    html += '<div class="kv">Actual <b>' + Math.round(c.temperature_2m) + '°</b> · High <b>' +
       Math.round(D.temperature_2m_max[0]) + '°</b> / Low <b>' + Math.round(D.temperature_2m_min[0]) + '°</b></div>';
   } else {
     html += '<div class="hero"><div><div class="big-temp">' + Math.round(D.temperature_2m_max[d]) + '°</div>' +
