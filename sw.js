@@ -1,7 +1,7 @@
 // Andy's Weather service worker — caches the app shell so it opens offline.
 // Weather, radar and alert data always come fresh from the network.
 
-var CACHE = 'andy-weather-v5';
+var CACHE = 'andy-weather-v5.1';
 var SHELL = [
   './',
   './index.html',
