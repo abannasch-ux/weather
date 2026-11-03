@@ -13,7 +13,9 @@
 <meta name="apple-mobile-web-app-title" content="Weather">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://api.open-meteo.com">
+<link rel="preconnect" href="https://api.weather.gov">
+<link rel="preconnect" href="https://air-quality-api.open-meteo.com">
 <style>
   :root { color-scheme: dark; --tab-h: 62px; }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -216,7 +218,6 @@
   <button id="tab-radar" type="button"><span class="ic">🌧️</span>Radar</button>
 </nav>
 
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
