@@ -147,7 +147,8 @@
   /* radar */
   #view-radar { margin: calc(-1 * (env(safe-area-inset-top) + 14px)) -16px 0; }
   #map { height: calc(100dvh - var(--tab-h) - env(safe-area-inset-bottom) - 52px); min-height: 320px; background: #0a141f; }
-  #radar-controls { display: flex; gap: 8px; align-items: center; padding: 8px 2px 0; }
+  #radar-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 2px 0; }
+  #radar-scrub { flex: 1 1 100%; order: 3; accent-color: #4cc3ff; height: 30px; margin: 0; }
   #radar-controls button {
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #eef4f8;
     border-radius: 999px; font-size: 15px; font-weight: 600; padding: 8px 18px; cursor: pointer;
@@ -198,6 +199,7 @@
     <div id="radar-controls">
       <button id="radar-play" type="button">Pause</button>
       <button id="radar-center" type="button">Center on me</button>
+      <input id="radar-scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Radar time scrubber">
       <span id="radar-time">Loading radar…</span>
     </div>
   </section>
