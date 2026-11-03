@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Andy's Weather</title>
+<meta name="description" content="Andy's personal weather: places, radar, and right-here precipitation.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d1b2a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weather">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { color-scheme: dark; --tab-h: 62px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1b2a; color: #eef4f8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100dvh;
+  }
+  main { padding: calc(env(safe-area-inset-top) + 14px) 16px calc(var(--tab-h) + env(safe-area-inset-bottom) + 18px); max-width: 640px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+  h1 { font-size: 26px; font-weight: 800; margin-bottom: 4px; }
+  .sub { color: #9db4c4; font-size: 14px; margin-bottom: 14px; }
+  /* search */
+  #search-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  #search-input {
+    flex: 1; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18);
+    border-radius: 12px; color: #eef4f8; font-size: 17px; padding: 11px 14px; outline: none;
+  }
+  #edit-btn {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18); color: #eef4f8;
+    border-radius: 12px; font-size: 15px; font-weight: 600; padding: 0 16px; cursor: pointer;
+  }
+  #search-results { display: none; margin-bottom: 12px; }
+  .search-item {
+    width: 100%; text-align: left; background: rgba(255,255,255,.05); color: #eef4f8;
+    border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 11px 14px;
+    font-size: 16px; margin-bottom: 6px; cursor: pointer;
+  }
+  .search-item span { color: #9db4c4; font-size: 13px; display: block; }
+  /* cards */
+  .card {
+    position: relative; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.11);
+    border-radius: 16px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; width: 100%;
+    text-align: left; color: #eef4f8; font: inherit;
+  }
+  .card .name { font-size: 19px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .card .alert-dot { color: #ffb02e; font-size: 17px; }
+  .card .now-row { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
+  .card .temp { font-size: 40px; font-weight: 800; line-height: 1.05; }
+  .card .cond { color: #c7d6e0; font-size: 16px; }
+  .card .meta { color: #9db4c4; font-size: 14.5px; margin-top: 5px; line-height: 1.45; }
+  .card .meta b { color: #dcebf5; font-weight: 600; }
+  .card .del {
+    display: none; position: absolute; top: 10px; right: 10px; width: 32px; height: 32px;
+    border-radius: 50%; border: none; background: #c0392b; color: #fff; font-size: 17px; cursor: pointer;
+  }
+  body.editing .card .del { display: block; }
+  .gps-card { border-color: rgba(76,195,255,.45); }
+  /* detail / here */
+  .big-temp { font-size: 74px; font-weight: 800; line-height: 1; }
+  .cond-line { font-size: 19px; color: #c7d6e0; margin-top: 4px; }
+  .verdict {
+    background: rgba(76,195,255,.12); border: 1px solid rgba(76,195,255,.35);
+    border-radius: 14px; padding: 13px 15px; font-size: 18.5px; line-height: 1.4; margin: 14px 0 6px;
+  }
+  .verdict b { color: #aee2ff; }
+  .kv { color: #9db4c4; font-size: 15.5px; margin-top: 8px; line-height: 1.5; }
+  .kv b { color: #eef4f8; font-weight: 600; }
+  .section-title { font-size: 15px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #9db4c4; margin: 20px 0 8px; }
+  .window-row {
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px; padding: 10px 14px; margin-bottom: 7px; font-size: 16.5px; line-height: 1.4;
+  }
+  .window-row span { color: #9db4c4; font-size: 14px; display: block; }
+  .hourly { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+  .hour {
+    flex: 0 0 auto; width: 66px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px; padding: 9px 4px; text-align: center;
+  }
+  .hour .h { font-size: 12.5px; color: #9db4c4; }
+  .hour .e { font-size: 20px; margin: 3px 0; }
+  .hour .t { font-size: 16.5px; font-weight: 700; }
+  .hour .p { font-size: 12px; color: #7ec8f7; min-height: 1.25em; }
+  .hour .w { font-size: 11.5px; color: #9db4c4; }
+  .day-row {
+    display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.045);
+    border: 1px solid rgba(255,255,255,.09); border-radius: 12px; padding: 10px 13px; margin-bottom: 7px; font-size: 15.5px;
+  }
+  .day-row .d { width: 44px; font-weight: 700; }
+  .day-row .e { font-size: 20px; }
+  .day-row .hl { margin-left: auto; text-align: right; }
+  .day-row .pp { color: #7ec8f7; font-size: 13.5px; display: block; }
+  .alert {
+    border-radius: 12px; padding: 11px 14px; margin-bottom: 8px; font-size: 15px; line-height: 1.4;
+    background: rgba(255,176,46,.13); border: 1px solid rgba(255,176,46,.55);
+  }
+  .alert.severe { background: rgba(224,49,49,.15); border-color: rgba(224,49,49,.65); }
+  .alert b { display: block; font-size: 16px; }
+  .alert span { color: #d8c9a8; font-size: 13.5px; }
+  .alert.severe span { color: #eec5c5; }
+  #back-btn {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18); color: #eef4f8;
+    border-radius: 999px; font-size: 15.5px; font-weight: 600; padding: 8px 18px; cursor: pointer; margin-bottom: 12px;
+  }
+  #status-line { color: #7e97a8; font-size: 13.5px; margin-top: 12px; }
+  /* radar */
+  #view-radar { margin: calc(-1 * (env(safe-area-inset-top) + 14px)) -16px 0; }
+  #map { height: calc(100dvh - var(--tab-h) - env(safe-area-inset-bottom) - 52px); min-height: 320px; background: #0a141f; }
+  #radar-controls {
+    display: flex; gap: 8px; align-items: center; padding: 8px 2px 0;
+  }
+  #radar-controls button {
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #eef4f8;
+    border-radius: 999px; font-size: 15px; font-weight: 600; padding: 8px 18px; cursor: pointer;
+  }
+  #radar-time { color: #9db4c4; font-size: 14.5px; margin-left: auto; }
+  .leaflet-container { font: inherit; }
+  /* tab bar */
+  #tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+    height: calc(var(--tab-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: rgba(10, 22, 34, .92); backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255,255,255,.13);
+    display: flex;
+  }
+  #tabbar button {
+    flex: 1; background: none; border: none; color: #8fa9bb; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px; padding-top: 6px;
+  }
+  #tabbar button .ic { font-size: 22px; line-height: 1; }
+  #tabbar button.active { color: #7ec8f7; }
+</style>
+</head>
+<body>
+<main>
+  <!-- PLACES -->
+  <section id="view-places" class="view">
+    <h1>Places</h1>
+    <div class="sub">Tap a place for hour-by-hour detail and the week ahead.</div>
+    <div id="search-row">
+      <input id="search-input" type="text" placeholder="Add a place — try a city name" autocomplete="off">
+      <button id="edit-btn" type="button">Edit</button>
+    </div>
+    <div id="search-results"></div>
+    <div id="gps-slot"></div>
+    <div id="places-list"></div>
+    <div id="places-status" class="sub"></div>
+  </section>
+
+  <!-- RADAR -->
+  <section id="view-radar" class="view">
+    <div id="map"></div>
+    <div id="radar-controls">
+      <button id="radar-play" type="button">Pause</button>
+      <button id="radar-center" type="button">Center on me</button>
+      <span id="radar-time">Loading radar…</span>
+    </div>
+  </section>
+
+  <!-- RIGHT HERE -->
+  <section id="view-here" class="view">
+    <h1>Right Here</h1>
+    <div class="sub">The weather where you are standing — precipitation first.</div>
+    <div id="here-body"><div class="sub">Getting your location…</div></div>
+  </section>
+
+  <!-- DETAIL -->
+  <section id="view-detail" class="view">
+    <button id="back-btn" type="button">← All places</button>
+    <div id="detail-body"></div>
+  </section>
+</main>
+
+<nav id="tabbar">
+  <button id="tab-places" type="button"><span class="ic">📍</span>Places</button>
+  <button id="tab-radar" type="button"><span class="ic">🌧️</span>Radar</button>
+  <button id="tab-here" type="button"><span class="ic">◎</span>Right Here</button>
+</nav>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
