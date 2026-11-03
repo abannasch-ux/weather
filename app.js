@@ -628,30 +628,45 @@ function renderDetail() {
   });
 }
 
-/* ---------------- Radar tab ---------------- */
+/* ---------------- Radar tab (MapLibre vector base + RainViewer) ---------------- */
 
-var radar = { inited: false, map: null, layers: [], frames: [], idx: 0, timer: null, playing: true, youMarker: null };
+var radar = { inited: false, ready: false, map: null, frames: [], idx: 0, visibleIdx: -1, timer: null, fadeTimer: null, playing: true, marker: null };
+
 function initRadar() {
-  if (radar.inited || typeof L === 'undefined') return;
+  if (radar.inited || typeof maplibregl === 'undefined') return;
   radar.inited = true;
-  radar.map = L.map('map', { zoomControl: true }).setView([FALLBACK.lat, FALLBACK.lon], 8);
-  // Esri satellite base + place labels (both keyless). CARTO's free tiles
-  // now serve an "API KEY REQUIRED" placeholder image — do not use them.
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Imagery © Esri · Radar © RainViewer · Weather © Open-Meteo / NWS',
-    maxZoom: 18
-  }).addTo(radar.map);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 18, zIndex: 20
-  }).addTo(radar.map);
+  // Vector base map (OpenFreeMap, keyless): crisp labels at every zoom,
+  // smooth animated zoom — raster bases (CARTO/Esri) served placeholder
+  // "API key required" / "zoom not supported" tiles.
+  radar.map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/liberty',
+    center: [FALLBACK.lon, FALLBACK.lat],
+    zoom: 7.5,
+    attributionControl: { compact: true },
+    fadeDuration: 120
+  });
+  radar.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  radar.map.on('load', function () {
+    radar.ready = true;
+    positionYou(false);
+    loadRadarFrames();
+  });
+}
+function positionYou(animate) {
   getPosition().then(function (pos) {
     var p = pos || FALLBACK;
-    radar.map.setView([p.lat, p.lon], 8);
-    radar.youMarker = L.circleMarker([p.lat, p.lon], {
-      radius: 7, color: '#4cc3ff', weight: 2, fillColor: '#4cc3ff', fillOpacity: 0.7
-    }).addTo(radar.map);
+    if (!radar.map) return;
+    if (animate) radar.map.flyTo({ center: [p.lon, p.lat], zoom: 7.5 });
+    else radar.map.jumpTo({ center: [p.lon, p.lat], zoom: 7.5 });
+    if (!radar.marker) {
+      var el = document.createElement('div');
+      el.className = 'you-dot';
+      radar.marker = new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(radar.map);
+    } else {
+      radar.marker.setLngLat([p.lon, p.lat]);
+    }
   });
-  loadRadarFrames();
 }
 function loadRadarFrames() {
   fetch('https://api.rainviewer.com/public/weather-maps.json')
@@ -661,47 +676,71 @@ function loadRadarFrames() {
       var past = (j.radar.past || []).map(function (f) { return { time: f.time, path: f.path, fc: false }; });
       var now = (j.radar.nowcast || []).map(function (f) { return { time: f.time, path: f.path, fc: true }; });
       radar.frames = past.concat(now);
-      radar.layers = radar.frames.map(function (f) {
-        var layer = L.tileLayer(host + f.path + '/256/{z}/{x}/{y}/2/1_1.png', { opacity: 0, zIndex: 10 });
-        layer.addTo(radar.map);
-        return layer;
+      // Insert radar layers just below the first label/symbol layer so
+      // place names and road shields stay readable on top of the radar.
+      var layers = radar.map.getStyle().layers;
+      var beforeId = null;
+      for (var i = 0; i < layers.length; i++) {
+        if (layers[i].type === 'symbol') { beforeId = layers[i].id; break; }
+      }
+      radar.frames.forEach(function (f, k) {
+        radar.map.addSource('rv' + k, {
+          type: 'raster',
+          tiles: [host + f.path + '/512/{z}/{x}/{y}/2/1_1.png'],
+          tileSize: 512
+        });
+        radar.map.addLayer({
+          id: 'rv' + k, type: 'raster', source: 'rv' + k,
+          paint: { 'raster-opacity': 0, 'raster-resampling': 'linear' }
+        }, beforeId || undefined);
       });
       radar.idx = Math.max(0, past.length - 1);
-      showRadarFrame(radar.idx);
+      setRadarFrame(radar.idx, true);
       startRadarAnim();
     })
     .catch(function () {
       document.getElementById('radar-time').textContent = 'Radar unavailable right now';
     });
 }
-function showRadarFrame(i) {
-  radar.layers.forEach(function (layer, k) { layer.setOpacity(k === i ? 0.78 : 0); });
+function setRadarFrame(i, instant) {
+  if (!radar.ready || !radar.frames.length) return;
+  var prev = radar.visibleIdx;
+  radar.visibleIdx = i;
   var f = radar.frames[i];
   if (f) {
     var t = new Date(f.time * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     document.getElementById('radar-time').textContent = t + (f.fc ? ' · forecast' : ' · observed');
   }
+  if (instant || prev < 0 || prev === i) {
+    radar.frames.forEach(function (_, k) {
+      radar.map.setPaintProperty('rv' + k, 'raster-opacity', k === i ? 0.8 : 0);
+    });
+    return;
+  }
+  // Crossfade: incoming frame fades up while the outgoing one fades out.
+  if (radar.fadeTimer) clearInterval(radar.fadeTimer);
+  var start = Date.now(), DUR = 300;
+  radar.fadeTimer = setInterval(function () {
+    var p = Math.min(1, (Date.now() - start) / DUR);
+    radar.map.setPaintProperty('rv' + i, 'raster-opacity', 0.8 * p);
+    radar.map.setPaintProperty('rv' + prev, 'raster-opacity', 0.8 * (1 - p));
+    if (p >= 1) { clearInterval(radar.fadeTimer); radar.fadeTimer = null; }
+  }, 40);
 }
 function startRadarAnim() {
   stopRadarAnim();
   radar.timer = setInterval(function () {
     if (!radar.playing || !radar.frames.length) return;
     radar.idx = (radar.idx + 1) % radar.frames.length;
-    showRadarFrame(radar.idx);
-  }, 800);
+    setRadarFrame(radar.idx, false);
+  }, 950);
 }
 function stopRadarAnim() { if (radar.timer) clearInterval(radar.timer); radar.timer = null; }
 document.getElementById('radar-play').addEventListener('click', function () {
   radar.playing = !radar.playing;
   this.textContent = radar.playing ? 'Pause' : 'Play';
 });
-document.getElementById('radar-center').addEventListener('click', function () {
-  getPosition().then(function (pos) {
-    var p = pos || FALLBACK;
-    if (radar.map) radar.map.setView([p.lat, p.lon], 8);
-    if (radar.youMarker) radar.youMarker.setLatLng([p.lat, p.lon]);
-  });
-});
+document.getElementById('radar-center').addEventListener('click', function () { positionYou(true); });
 
 /* ---------------- Tabs ---------------- */
 
@@ -714,7 +753,7 @@ function showView(name) {
   document.getElementById('tab-radar').classList.toggle('active', name === 'radar');
   if (name === 'radar') {
     initRadar();
-    setTimeout(function () { if (radar.map) radar.map.invalidateSize(); }, 60);
+    setTimeout(function () { if (radar.map) radar.map.resize(); }, 60);
   }
   window.scrollTo(0, 0);
 }
