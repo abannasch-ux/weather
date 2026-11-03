@@ -643,6 +643,25 @@ function renderDetail() {
 
 var radar = { inited: false, ready: false, map: null, frames: [], idx: 0, visibleIdx: -1, timer: null, fadeTimer: null, playing: true, marker: null, framesAt: 0 };
 
+var maplibrePromise = null;
+function ensureMapLibre() {
+  // The radar map library is heavy (~1 MB). Load it lazily the first time
+  // the Radar tab is opened instead of on every app launch.
+  if (typeof maplibregl !== 'undefined') return Promise.resolve();
+  if (maplibrePromise) return maplibrePromise;
+  maplibrePromise = new Promise(function (resolve, reject) {
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css';
+    document.head.appendChild(css);
+    var sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js';
+    sc.onload = function () { resolve(); };
+    sc.onerror = function () { reject(new Error('map library failed to load')); };
+    document.head.appendChild(sc);
+  });
+  return maplibrePromise;
+}
 function initRadar() {
   if (radar.inited || typeof maplibregl === 'undefined') return;
   radar.inited = true;
@@ -787,9 +806,11 @@ function showView(name) {
   document.getElementById('tab-places').classList.toggle('active', name === 'places' || name === 'detail');
   document.getElementById('tab-radar').classList.toggle('active', name === 'radar');
   if (name === 'radar') {
-    initRadar();
-    setTimeout(function () { if (radar.map) radar.map.resize(); }, 60);
-    if (radar.ready && radar.framesAt && Date.now() - radar.framesAt > 5 * 60 * 1000) refreshRadarFrames();
+    ensureMapLibre().then(function () {
+      initRadar();
+      setTimeout(function () { if (radar.map) radar.map.resize(); }, 60);
+      if (radar.ready && radar.framesAt && Date.now() - radar.framesAt > 5 * 60 * 1000) refreshRadarFrames();
+    }).catch(function () { /* map library unavailable; radar stays blank */ });
   }
   window.scrollTo(0, 0);
 }
