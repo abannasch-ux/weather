@@ -129,7 +129,7 @@ function fetchForecast(lat, lon) {
   var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) +
     '&longitude=' + lon.toFixed(4) +
     '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m,precipitation' +
-    '&hourly=temperature_2m,weather_code,precipitation,precipitation_probability,snowfall,wind_speed_10m,wind_gusts_10m,uv_index' +
+    '&hourly=temperature_2m,apparent_temperature,weather_code,precipitation,precipitation_probability,snowfall,wind_speed_10m,wind_gusts_10m,uv_index' +
     '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,snowfall_sum,precipitation_probability_max,wind_gusts_10m_max,uv_index_max,sunrise,sunset' +
     '&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&snowfall_unit=inch' +
     '&timezone=auto&forecast_days=7';
@@ -212,9 +212,13 @@ function hourLabels(y) {
   return s;
 }
 function tempChart(data, d, nI) {
-  var H = data.hourly, s = dayStart(data, d), temps = [], i, v;
-  for (i = 0; i < 24; i++) temps.push(H.temperature_2m[s + i]);
-  var min = Math.min.apply(null, temps), max = Math.max.apply(null, temps);
+  var H = data.hourly, s = dayStart(data, d), temps = [], feels = [], i, v;
+  for (i = 0; i < 24; i++) {
+    temps.push(H.temperature_2m[s + i]);
+    feels.push(H.apparent_temperature && H.apparent_temperature[s + i] !== null && H.apparent_temperature[s + i] !== undefined ? H.apparent_temperature[s + i] : H.temperature_2m[s + i]);
+  }
+  var both = temps.concat(feels);
+  var min = Math.min.apply(null, both), max = Math.max.apply(null, both);
   var lo = min - 3, hi = max + 3, HGT = 128, padT = 18, padB = 22;
   function Y(t) { return padT + (hi - t) / (hi - lo) * (HGT - padT - padB); }
   var pts = temps.map(function (t, k) { return chX(k).toFixed(1) + ',' + Y(t).toFixed(1); });
@@ -227,6 +231,8 @@ function tempChart(data, d, nI) {
   svg += '<path d="' + area + '" fill="url(#tgrad)"/>';
   svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#ffb02e" stroke-width="2.5" stroke-linejoin="round"/>';
   temps.forEach(function (t, k) { svg += '<circle cx="' + chX(k) + '" cy="' + Y(t) + '" r="1.8" fill="#ffd28a"/>'; });
+  var fpts = feels.map(function (t, k) { return chX(k).toFixed(1) + ',' + Y(t).toFixed(1); });
+  svg += '<polyline points="' + fpts.join(' ') + '" fill="none" stroke="#9fd8ff" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round" opacity=".9"/>';
   svg += '<text x="' + chX(maxI) + '" y="' + (Y(max) - 6) + '" font-size="12" font-weight="700" fill="#eef4f8" text-anchor="middle">' + Math.round(max) + '°</text>';
   svg += '<text x="' + chX(minI) + '" y="' + (Y(min) + 15) + '" font-size="12" font-weight="700" fill="#aee2ff" text-anchor="middle">' + Math.round(min) + '°</text>';
   if (d === 0 && nI !== null) {
@@ -242,12 +248,13 @@ function tempChart(data, d, nI) {
 }
 function precipChart(data, d) {
   var H = data.hourly, s = dayStart(data, d), i;
-  var amts = [], snows = [], probs = [], maxAmt = 0.08;
+  var amts = [], snows = [], probs = [], maxAmt = 0.08, maxDispI = -1, maxDisp = 0;
   for (i = 0; i < 24; i++) {
     var p = H.precipitation[s + i] || 0, sn = H.snowfall[s + i] || 0;
     amts.push(p); snows.push(sn); probs.push(H.precipitation_probability[s + i] || 0);
     var disp = sn >= 0.03 ? sn : p;
     if (disp > maxAmt) maxAmt = disp;
+    if (disp > maxDisp) { maxDisp = disp; maxDispI = i; }
   }
   var HGT = 112, padT = 20, padB = 22, base = HGT - padB;
   var slotW = (CH_W - CH_PAD_L - CH_PAD_R) / 24, barW = slotW * 0.62;
@@ -260,12 +267,16 @@ function precipChart(data, d) {
       var hgt = Math.max(3, dispV / maxAmt * (base - padT));
       var x = CH_PAD_L + i * slotW + (slotW - barW) / 2;
       svg += '<rect x="' + x.toFixed(1) + '" y="' + (base - hgt).toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + hgt.toFixed(1) + '" rx="2" fill="' + (isSnow ? '#e8f4fb' : '#4cc3ff') + '"/>';
-      if (dispV >= 0.03) {
+      if (i === maxDispI && dispV >= 0.02) {
         svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (base - hgt - 4).toFixed(1) + '" font-size="9.5" fill="#dcebf5" text-anchor="middle">' + fmtAmt(dispV) + '</text>';
       }
-    } else if (probs[i] >= 30) {
-      svg += '<text x="' + (CH_PAD_L + i * slotW + slotW / 2).toFixed(1) + '" y="' + (base - 5) + '" font-size="9" fill="#5f87a0" text-anchor="middle">' + probs[i] + '%</text>';
     }
+  }
+  var pPts = probs.map(function (p, k) { return (CH_PAD_L + k * slotW + slotW / 2).toFixed(1) + ',' + (padT + (100 - p) / 100 * (base - padT)).toFixed(1); });
+  svg += '<polyline points="' + pPts.join(' ') + '" fill="none" stroke="#8fd0f5" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round" opacity=".95"/>';
+  var maxProb = Math.max.apply(null, probs), pkI = probs.indexOf(maxProb);
+  if (maxProb >= 30) {
+    svg += '<text x="' + (CH_PAD_L + 2) + '" y="' + (padT - 7) + '" font-size="9.5" fill="#8fd0f5">chance peaks ' + maxProb + '% · ' + fmtHour(H.time[s + pkI]) + '</text>';
   }
   svg += hourLabels(HGT - 6);
   svg += '</svg>';
@@ -572,14 +583,14 @@ function renderDetail() {
   var maxT = Math.max.apply(null, temps), minT = Math.min.apply(null, temps);
   var maxTH = temps.indexOf(maxT), minTH = temps.indexOf(minT);
   html += '<div class="section-title">Temperature</div><div class="chart-box">' + tempChart(data, d, isToday ? nI : null) +
-    '<div class="chart-cap">High <b>' + Math.round(maxT) + '°</b> at ' + fmtHour(H.time[s + maxTH]) + ' · Low <b>' + Math.round(minT) + '°</b> at ' + fmtHour(H.time[s + minTH]) + '</div></div>';
+    '<div class="chart-cap">High <b>' + Math.round(maxT) + '°</b> at ' + fmtHour(H.time[s + maxTH]) + ' · Low <b>' + Math.round(minT) + '°</b> at ' + fmtHour(H.time[s + minTH]) + ' · dashed blue = feels like</div></div>';
 
   var totRain = D.precipitation_sum[d] || 0, totSnow = D.snowfall_sum[d] || 0;
   var precipCap = totSnow >= 0.1 ? 'Total <b>' + fmtAmt(totSnow) + ' in of snow</b> expected'
     : totRain > 0.005 ? 'Total <b>' + fmtAmt(totRain) + ' in of rain</b> expected'
     : 'No precipitation expected';
   html += '<div class="section-title">Precipitation by hour</div><div class="chart-box">' + precipChart(data, d) +
-    '<div class="chart-cap">' + precipCap + ' · bars = inches per hour, % = chance</div></div>';
+    '<div class="chart-cap">' + precipCap + ' · bars = amount per hour · dashed line = chance of rain</div></div>';
 
   var sevDay = windSev(Math.max.apply(null, H.wind_speed_10m.slice(s, e)), D.wind_gusts_10m_max[d]);
   html += '<div class="section-title">Wind — severity</div><div class="chart-box">' + windChart(data, d) +
@@ -630,7 +641,7 @@ function renderDetail() {
 
 /* ---------------- Radar tab (MapLibre vector base + RainViewer) ---------------- */
 
-var radar = { inited: false, ready: false, map: null, frames: [], idx: 0, visibleIdx: -1, timer: null, fadeTimer: null, playing: true, marker: null };
+var radar = { inited: false, ready: false, map: null, frames: [], idx: 0, visibleIdx: -1, timer: null, fadeTimer: null, playing: true, marker: null, framesAt: 0 };
 
 function initRadar() {
   if (radar.inited || typeof maplibregl === 'undefined') return;
@@ -676,6 +687,7 @@ function loadRadarFrames() {
       var past = (j.radar.past || []).map(function (f) { return { time: f.time, path: f.path, fc: false }; });
       var now = (j.radar.nowcast || []).map(function (f) { return { time: f.time, path: f.path, fc: true }; });
       radar.frames = past.concat(now);
+      radar.framesAt = Date.now();
       // Insert radar layers just below the first label/symbol layer so
       // place names and road shields stay readable on top of the radar.
       var layers = radar.map.getStyle().layers;
@@ -686,8 +698,12 @@ function loadRadarFrames() {
       radar.frames.forEach(function (f, k) {
         radar.map.addSource('rv' + k, {
           type: 'raster',
-          tiles: [host + f.path + '/512/{z}/{x}/{y}/2/1_1.png'],
-          tileSize: 512
+          // RainViewer publishes tiles only through zoom 7; higher zooms
+          // return a "Zoom Level Not Supported" placeholder tile. maxzoom 7
+          // makes MapLibre overscale the z7 tiles when zoomed in instead.
+          tiles: [host + f.path + '/256/{z}/{x}/{y}/2/1_1.png'],
+          tileSize: 256,
+          maxzoom: 7
         });
         radar.map.addLayer({
           id: 'rv' + k, type: 'raster', source: 'rv' + k,
@@ -695,12 +711,23 @@ function loadRadarFrames() {
         }, beforeId || undefined);
       });
       radar.idx = Math.max(0, past.length - 1);
+      var sc = document.getElementById('radar-scrub');
+      if (sc) { sc.max = Math.max(0, radar.frames.length - 1); sc.value = radar.idx; }
       setRadarFrame(radar.idx, true);
       startRadarAnim();
     })
     .catch(function () {
       document.getElementById('radar-time').textContent = 'Radar unavailable right now';
     });
+}
+function refreshRadarFrames() {
+  if (!radar.ready) return;
+  radar.frames.forEach(function (_, k) {
+    if (radar.map.getLayer('rv' + k)) radar.map.removeLayer('rv' + k);
+    if (radar.map.getSource('rv' + k)) radar.map.removeSource('rv' + k);
+  });
+  radar.frames = []; radar.visibleIdx = -1;
+  loadRadarFrames();
 }
 function setRadarFrame(i, instant) {
   if (!radar.ready || !radar.frames.length) return;
@@ -710,6 +737,8 @@ function setRadarFrame(i, instant) {
   if (f) {
     var t = new Date(f.time * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     document.getElementById('radar-time').textContent = t + (f.fc ? ' · forecast' : ' · observed');
+    var sc2 = document.getElementById('radar-scrub');
+    if (sc2 && document.activeElement !== sc2) sc2.value = i;
   }
   if (instant || prev < 0 || prev === i) {
     radar.frames.forEach(function (_, k) {
@@ -741,6 +770,12 @@ document.getElementById('radar-play').addEventListener('click', function () {
   this.textContent = radar.playing ? 'Pause' : 'Play';
 });
 document.getElementById('radar-center').addEventListener('click', function () { positionYou(true); });
+document.getElementById('radar-scrub').addEventListener('input', function () {
+  radar.playing = false;
+  document.getElementById('radar-play').textContent = 'Play';
+  radar.idx = parseInt(this.value, 10) || 0;
+  setRadarFrame(radar.idx, true);
+});
 
 /* ---------------- Tabs ---------------- */
 
@@ -754,6 +789,7 @@ function showView(name) {
   if (name === 'radar') {
     initRadar();
     setTimeout(function () { if (radar.map) radar.map.resize(); }, 60);
+    if (radar.ready && radar.framesAt && Date.now() - radar.framesAt > 5 * 60 * 1000) refreshRadarFrames();
   }
   window.scrollTo(0, 0);
 }
