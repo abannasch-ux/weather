@@ -200,6 +200,89 @@ function windowSentence(w, data, liveIdx) {
   return '<b>' + w.kind + ' starting ' + fmtHour(H.time[w.start]) + '</b>, through about ' + endTxt + tail;
 }
 
+/* ---------------- What to wear ---------------- */
+// Built from Andy's actual closet and his own wear tests. Bus stop:
+// 7:45 AM, ~20 minutes standing, one normal-looking grab over jeans /
+// t-shirt / zip hoodie — the Gilliam covers most of the season.
+// Hunting: stationary sit, bands run warm on purpose; the settled
+// stack is base -> down -> Carhartt over it, worn loose, not tight.
+
+function busStopPick(data, d) {
+  var H = data.hourly, s = dayStart(data, d);
+  function ap(i) {
+    var v = H.apparent_temperature[i];
+    return (v === null || v === undefined) ? H.temperature_2m[i] : v;
+  }
+  var i7 = s + 7, i8 = s + 8;
+  var feels = Math.round((ap(i7) + ap(i8)) / 2);
+  var gust = Math.max(H.wind_gusts_10m[i7] || 0, H.wind_gusts_10m[i8] || 0);
+  var prob = Math.max(H.precipitation_probability[i7] || 0, H.precipitation_probability[i8] || 0);
+  var amt = (H.precipitation[i7] || 0) + (H.precipitation[i8] || 0);
+  var snow = (H.snowfall[i7] || 0) + (H.snowfall[i8] || 0);
+  var pick, note;
+  if (feels >= 66) {
+    pick = 'T-shirt, light zip hoodie in hand';
+    note = 'Warm for that hour — the hoodie is just insurance for the walk back.';
+  } else if (feels >= 57) {
+    pick = 'Light zip hoodie';
+    note = 'Mild morning. No jacket needed.';
+  } else if (feels >= 47) {
+    if (gust >= 14) { pick = 'Gilliam over the hoodie'; note = 'Wind makes a knit hoodie leak — the Gilliam seals it.'; }
+    else { pick = 'Heavy Carhartt hoodie'; note = 'Cool but calm — the heavy hoodie is enough on its own.'; }
+  } else if (feels >= 33) {
+    if (gust >= 16) { pick = 'Sherpa Carhartt over the hoodie'; note = 'Gilliam band, but the wind is up — the Carhartt blocks it better.'; }
+    else { pick = 'Gilliam over the hoodie'; note = 'The standard. The Gilliam covers this band most of the season.'; }
+  } else if (feels >= 20) {
+    pick = 'Sherpa Carhartt over the hoodie';
+    note = 'Below Gilliam weather — one warm grab, no stack.';
+  } else {
+    pick = 'Sherpa Carhartt + heated vest under the hoodie';
+    note = 'Deep cold. Vest on high while you get ready — it hides under the hoodie, so no layered look.';
+  }
+  var out = '<div class="pick">🧥 ' + pick + '</div>' +
+    '<div class="why">Feels like <b>' + feels + '°</b> around 7:45 AM' +
+    (gust >= 10 ? ' · gusts ' + Math.round(gust) + ' mph' : '') + '. ' + note + '</div>';
+  if (snow > 0.05) out += '<div style="margin-top:6px">❄️ Snow around then — boots, not shoes.</div>';
+  else if (prob >= 40 || amt > 0.005) out += '<div style="margin-top:6px">🌧️ Rain likely — <b>Columbia rain shell</b> over the top of it.</div>';
+  return out;
+}
+
+function huntingPick(data, d) {
+  var H = data.hourly, s = dayStart(data, d);
+  var cold = null, gust = 0, wet = false, i, v;
+  for (i = s + 6; i <= s + 19 && i < H.time.length; i++) {
+    v = H.apparent_temperature[i];
+    if (v === null || v === undefined) v = H.temperature_2m[i];
+    if (cold === null || v < cold) cold = v;
+    if ((H.wind_gusts_10m[i] || 0) > gust) gust = H.wind_gusts_10m[i];
+    if ((H.precipitation[i] || 0) > 0.005) wet = true;
+  }
+  cold = Math.round(cold);
+  var top, bottoms;
+  if (cold >= 50) {
+    top = 'Smartwool base + down jacket + cotton hoodie over it (dirt shield)';
+    bottoms = 'Pants + light base bottoms · blanket optional';
+  } else if (cold >= 38) {
+    top = 'Base + down vest under the down jacket + ' + (gust >= 12 ? 'Carhartt over it (wind is up)' : 'cotton hoodie over it');
+    bottoms = 'Base bottoms + insulated pants · fleece blanket for your legs';
+  } else if (cold >= 27) {
+    top = 'Heated base (low) + heated vest + down jacket + Carhartt over it — loose, not tight';
+    bottoms = 'Heated base bottoms + insulated pants · fleece blanket · Buddy heater';
+  } else if (cold >= 15) {
+    top = 'Heated base + heated vest + down vest + down jacket + Carhartt';
+    bottoms = 'Base bottoms + Eskimo bibs · blanket over your legs and one under you · boot blankets + foot pads · Buddy heater';
+  } else {
+    top = 'Everything: heated base + heated vest + down vest + down jacket + Carhartt';
+    bottoms = 'Bibs + both blankets · heated socks on low · hand warmers · Buddy heater';
+  }
+  var out = '<div class="pick">🦌 Coldest part of the sit feels like ' + cold + '°</div>' +
+    '<div><b>Top:</b> ' + top + '</div>' +
+    '<div><b>Bottoms:</b> ' + bottoms + '</div>';
+  if (wet) out += '<div style="margin-top:6px">🌧️ Rain in the sit window — Columbia shell over the down instead of the hoodie.</div>';
+  out += '<div class="why">Priced for sitting still, first light to last — runs warm on purpose. Gusts to ' + Math.round(gust) + ' mph in the window.</div>';
+  return out;
+}
+
 /* ---------------- Charts (inline SVG) ---------------- */
 
 var CH_W = 352, CH_PAD_L = 10, CH_PAD_R = 10;
@@ -577,6 +660,11 @@ function renderDetail() {
   }
   html += '<div class="verdict">' + verdict + '</div>';
 
+  // What to wear — today and tomorrow only; beyond that is guessing.
+  if (d <= 1) {
+    html += '<div class="section-title">Bus stop — 7:45 AM</div><div class="clothes">' + busStopPick(data, d) + '</div>';
+  }
+
   // Charts
   var temps = [], i;
   for (i = s; i < e; i++) temps.push(H.temperature_2m[i]);
@@ -600,6 +688,10 @@ function renderDetail() {
   html += wins.length
     ? wins.map(function (w) { return '<div class="window-row">' + windowSentence(w, data, isToday ? nI : null) + '</div>'; }).join('')
     : '<div class="window-row">Dry all day.</div>';
+
+  if (d <= 1) {
+    html += '<div class="section-title">Hunting clothes — the sit</div><div class="clothes">' + huntingPick(data, d) + '</div>';
+  }
 
   // Bottom info: UV + air
   var uvMax = D.uv_index_max[d];
